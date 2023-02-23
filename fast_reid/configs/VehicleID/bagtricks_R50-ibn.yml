@@ -9,6 +9,7 @@ MODEL:
     WITH_IBN: True
   HEADS:
     POOL_LAYER: GeneralizedMeanPooling
+  DEVICE: cpu
 
   LOSSES:
     TRI:
