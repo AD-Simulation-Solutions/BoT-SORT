@@ -4,6 +4,7 @@ MODEL:
   BACKBONE:
     DEPTH: 101x
     WITH_IBN: True
+  DEVICE: cpu
 
 DATASETS:
   NAMES: ("Market1501",)

@@ -83,7 +83,8 @@ class FastReIDInterface:
         batch_patches = []
         patches = []
         for d in range(np.size(detections, 0)):
-            tlbr = detections[d, :4].numpy().astype(np.int_)
+            tlbr = detections[d, :4].astype(np.int_)
+            # tlbr = detections[d, :4].numpy().astype(np.int_)
             tlbr[0] = max(0, tlbr[0])
             tlbr[1] = max(0, tlbr[1])
             tlbr[2] = min(W - 1, tlbr[2])

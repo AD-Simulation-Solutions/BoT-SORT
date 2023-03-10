@@ -269,7 +269,7 @@ class BoTSORT(object):
             bboxes = bboxes[lowest_inds]
             scores = scores[lowest_inds]
             classes = classes[lowest_inds]
-            features = output_results[lowest_inds]
+            features = features[lowest_inds]
 
             # Find high threshold detections
             remain_inds = scores > self.args.track_high_thresh
@@ -378,7 +378,8 @@ class BoTSORT(object):
         else:
             detections_second = []
 
-        r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
+        r_tracked_stracks = [strack_pool[i] for i in u_track]
+        # r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
         dists = matching.iou_distance(r_tracked_stracks, detections_second)
         matches, u_track, u_detection_second = matching.linear_assignment(dists, thresh=0.5)
         for itracked, idet in matches:
@@ -397,8 +398,11 @@ class BoTSORT(object):
                 track.mark_lost()
                 lost_stracks.append(track)
 
+
         '''Deal with unconfirmed tracks, usually tracks with only one beginning frame'''
-        detections = [detections[i] for i in u_detection]
+        detections_primary = [detections[i] for i in u_detection]
+        detections_secondary = [detections_second[i] for i in u_detection_second]
+        detections = detections_primary + list(set(detections_secondary) - set(detections_primary))
         dists = matching.iou_distance(unconfirmed, detections)
         if not self.args.mot20:
             dists = matching.fuse_score(dists, detections)
