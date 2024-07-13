@@ -37,8 +37,11 @@ class KalmanFilter(object):
 
     """
 
-    def __init__(self):
+    def __init__(self, position_weight = 1. / 20, velocity_weight = 1. / 160, pos_init_factor = 2, vel_init_factor = 10):
         ndim, dt = 4, 1.
+
+        self.pos_init_factor = pos_init_factor
+        self.vel_init_factor = vel_init_factor
 
         # Create Kalman filter model matrices.
         self._motion_mat = np.eye(2 * ndim, 2 * ndim)
@@ -49,8 +52,8 @@ class KalmanFilter(object):
         # Motion and observation uncertainty are chosen relative to the current
         # state estimate. These weights control the amount of uncertainty in
         # the model. This is a bit hacky.
-        self._std_weight_position = 1. / 20
-        self._std_weight_velocity = 1. / 160
+        self._std_weight_position = position_weight 
+        self._std_weight_velocity = velocity_weight 
 
     def initiate(self, measurement):
         """Create track from unassociated measurement.
@@ -73,15 +76,26 @@ class KalmanFilter(object):
         mean_vel = np.zeros_like(mean_pos)
         mean = np.r_[mean_pos, mean_vel]
 
+        """
         std = [
-            2 * self._std_weight_position * measurement[2],
-            2 * self._std_weight_position * measurement[3],
-            2 * self._std_weight_position * measurement[2],
-            2 * self._std_weight_position * measurement[3],
-            10 * self._std_weight_velocity * measurement[2],
-            10 * self._std_weight_velocity * measurement[3],
-            10 * self._std_weight_velocity * measurement[2],
-            10 * self._std_weight_velocity * measurement[3]]
+            self.pos_init_factor * self._std_weight_position * measurement[2],
+            self.pos_init_factor * self._std_weight_position * measurement[3],
+            self.pos_init_factor * self._std_weight_position * measurement[2],
+            self.pos_init_factor * self._std_weight_position * measurement[3],
+            self.vel_init_factor * self._std_weight_velocity * measurement[2],
+            self.vel_init_factor * self._std_weight_velocity * measurement[3],
+            self.vel_init_factor * self._std_weight_velocity * measurement[2],
+            self.vel_init_factor * self._std_weight_velocity * measurement[3]]
+        """
+        std = [
+            self.pos_init_factor * self._std_weight_position * measurement[0],
+            self.pos_init_factor * self._std_weight_position * measurement[1],
+            self.pos_init_factor * self._std_weight_position * measurement[2],
+            self.pos_init_factor * self._std_weight_position * measurement[3],
+            self.vel_init_factor * self._std_weight_velocity * measurement[0],
+            self.vel_init_factor * self._std_weight_velocity * measurement[1],
+            self.vel_init_factor * self._std_weight_velocity * measurement[2],
+            self.vel_init_factor * self._std_weight_velocity * measurement[3]]
         covariance = np.diag(np.square(std))
         return mean, covariance
 
@@ -104,6 +118,7 @@ class KalmanFilter(object):
             state. Unobserved velocities are initialized to 0 mean.
 
         """
+        """
         std_pos = [
             self._std_weight_position * mean[2],
             self._std_weight_position * mean[3],
@@ -112,6 +127,17 @@ class KalmanFilter(object):
         std_vel = [
             self._std_weight_velocity * mean[2],
             self._std_weight_velocity * mean[3],
+            self._std_weight_velocity * mean[2],
+            self._std_weight_velocity * mean[3]]
+        """
+        std_pos = [
+            self._std_weight_position * mean[0],
+            self._std_weight_position * mean[1],
+            self._std_weight_position * mean[2],
+            self._std_weight_position * mean[3]]
+        std_vel = [
+            self._std_weight_velocity * mean[0],
+            self._std_weight_velocity * mean[1],
             self._std_weight_velocity * mean[2],
             self._std_weight_velocity * mean[3]]
         motion_cov = np.diag(np.square(np.r_[std_pos, std_vel]))
@@ -139,9 +165,16 @@ class KalmanFilter(object):
             estimate.
 
         """
+        """
         std = [
             self._std_weight_position * mean[2],
             self._std_weight_position * mean[3],
+            self._std_weight_position * mean[2],
+            self._std_weight_position * mean[3]]
+        """
+        std = [
+            self._std_weight_position * mean[0],
+            self._std_weight_position * mean[1],
             self._std_weight_position * mean[2],
             self._std_weight_position * mean[3]]
         innovation_cov = np.diag(np.square(std))
@@ -167,6 +200,7 @@ class KalmanFilter(object):
             Returns the mean vector and covariance matrix of the predicted
             state. Unobserved velocities are initialized to 0 mean.
         """
+        """
         std_pos = [
             self._std_weight_position * mean[:, 2],
             self._std_weight_position * mean[:, 3],
@@ -175,6 +209,17 @@ class KalmanFilter(object):
         std_vel = [
             self._std_weight_velocity * mean[:, 2],
             self._std_weight_velocity * mean[:, 3],
+            self._std_weight_velocity * mean[:, 2],
+            self._std_weight_velocity * mean[:, 3]]
+        """
+        std_pos = [
+            self._std_weight_position * mean[:, 0],
+            self._std_weight_position * mean[:, 1],
+            self._std_weight_position * mean[:, 2],
+            self._std_weight_position * mean[:, 3]]
+        std_vel = [
+            self._std_weight_velocity * mean[:, 0],
+            self._std_weight_velocity * mean[:, 1],
             self._std_weight_velocity * mean[:, 2],
             self._std_weight_velocity * mean[:, 3]]
         sqr = np.square(np.r_[std_pos, std_vel]).T

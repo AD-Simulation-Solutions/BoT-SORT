@@ -24,11 +24,14 @@ def attempt_download(file, repo='WongKinYiu/yolov7'):
     if not file.exists():
         try:
             response = requests.get(f'https://api.github.com/repos/{repo}/releases/latest').json()  # github api
+            print(">>>>", response)
             assets = [x['name'] for x in response['assets']]  # release assets
             tag = response['tag_name']  # i.e. 'v1.0'
-        except:  # fallback plan
+        except Exception as e:  # fallback plan
             assets = ['yolov7.pt']
-            tag = subprocess.check_output('git tag', shell=True).decode().split()[-1]
+            output = subprocess.check_output('git tag', shell=True).decode()
+            print(">>>>>", e)
+            tag = output.split()[-1]
 
         name = file.name
         if name in assets:

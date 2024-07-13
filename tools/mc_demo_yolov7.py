@@ -22,6 +22,8 @@ from tracker.tracking_utils.timer import Timer
 sys.path.insert(0, './yolov7')
 sys.path.append('.')
 
+unbounds = []
+
 def write_results(filename, results):
     save_format = '{frame},{id},{x1},{y1},{w},{h},{s},-1,-1,-1\n'
     with open(filename, 'w') as f:
@@ -87,6 +89,9 @@ def detect(save_img=False):
     # Run inference
     if device.type != 'cpu':
         model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
+
+
+
     t0 = time.time()
     for path, img, im0s, vid_cap in dataset:
         img = torch.from_numpy(img).to(device)
@@ -124,39 +129,76 @@ def detect(save_img=False):
                 detections = det.cpu().numpy()
                 detections[:, :4] = boxes
 
-            online_targets = tracker.update(detections, im0)
+            online_targets, lost, unbound = tracker.update(detections, im0)
 
             online_tlwhs = []
             online_ids = []
             online_scores = []
             online_cls = []
-            for t in online_targets:
-                tlwh = t.tlwh
-                tlbr = t.tlbr
-                tid = t.track_id
-                tcls = t.cls
-                if tlwh[2] * tlwh[3] > opt.min_box_area:
-                    online_tlwhs.append(tlwh)
-                    online_ids.append(tid)
-                    online_scores.append(t.score)
-                    online_cls.append(t.cls)
 
-                    # save results
-                    results.append(
-                        f"{i + 1},{tid},{tlwh[0]:.2f},{tlwh[1]:.2f},{tlwh[2]:.2f},{tlwh[3]:.2f},{t.score:.2f},-1,-1,-1\n"
-                    )
+            def keep(unbound):
+                global unbounds
+                keep_state = (unbound, frame)
+                if keep_state not in unbounds:
+                    unbounds.append(keep_state)
+                unbounds = [(u_track, frame_number) for (u_track, frame_number) in unbounds if frame_number + 30 > frame]
+                return unbounds
 
-                    if save_img or view_img:  # Add bbox to image
-                        if opt.hide_labels_name:
-                            label = f'{tid}, {int(tcls)}'
-                        else:
-                            label = f'{tid}, {names[int(tcls)]}'
-                        plot_one_box(tlbr, im0, label=label, color=colors[int(tid) % len(colors)], line_thickness=2)
+            draw_boxes_for(
+                tracker_result=online_targets,
+                online_tlwhs=online_tlwhs,
+                online_scores=online_scores,
+                online_ids=online_ids,
+                online_cls=online_cls,
+                results=results,
+                save_img=save_img,
+                view_img=view_img,
+                im0=im0,
+                names=names,
+                colors=colors,
+                i=i
+            )
+            draw_boxes_for(
+                tracker_result=lost,
+                online_tlwhs=online_tlwhs,
+                online_scores=online_scores,
+                online_ids=online_ids,
+                online_cls=online_cls,
+                results=results,
+                save_img=save_img,
+                view_img=view_img,
+                im0=im0,
+                names=names,
+                color=[255, 0, 0],
+                colors=colors,
+                add_label="LOST",
+                i=i
+            )
+            for u_track, _ in keep(unbound=unbound):
+                draw_boxes_for(
+                    tracker_result=u_track,
+                    online_tlwhs=online_tlwhs,
+                    online_scores=online_scores,
+                    online_ids=online_ids,
+                    online_cls=online_cls,
+                    results=results,
+                    save_img=save_img,
+                    view_img=view_img,
+                    im0=im0,
+                    names=names,
+                    color=[0, 255, 0],
+                    colors=colors,
+                    add_label="UNBOUND",
+                    i=i
+                )
+            
             p = Path(p)  # to Path
             save_path = str(save_dir / p.name)  # img.jpg
 
             # Print time (inference + NMS)
             # print(f'{s}Done. ({t2 - t1:.3f}s)')
+
+            print(">>>> Online ids:", online_targets)
 
             # Stream results
             if view_img:
@@ -187,6 +229,35 @@ def detect(save_img=False):
         # print(f"Results saved to {save_dir}{s}")
 
     print(f'Done. ({time.time() - t0:.3f}s)')
+
+def draw_boxes_for(tracker_result, online_tlwhs, online_ids, online_scores, online_cls, results, save_img, view_img, im0, names, colors, i, add_label = None, outline=1, color=None):
+    if not tracker_result:
+        return
+    for t in tracker_result:
+        tlwh = t.tlwh
+        tlbr = t.tlbr
+        tid = t.track_id
+        tcls = t.cls
+        if tlwh[2] * tlwh[3] > opt.min_box_area:
+            online_tlwhs.append(tlwh)
+            online_ids.append(tid)
+            online_scores.append(t.score)
+            online_cls.append(t.cls)
+
+            # save results
+            results.append(
+                f"{i + 1},{tid},{tlwh[0]:.2f},{tlwh[1]:.2f},{tlwh[2]:.2f},{tlwh[3]:.2f},{t.score:.2f},-1,-1,-1\n"
+            )
+
+            suffix = ", " + add_label if add_label else ""
+            color = colors[int(tid) % len(colors)] if not color else color
+
+            if save_img or view_img:  # Add bbox to image
+                if opt.hide_labels_name:
+                    label = f'{tid}, {int(tcls)}{suffix}'
+                else:
+                    label = f'{tid}, {names[int(tcls)]}{suffix}'
+                plot_one_box(tlbr, im0, label=label, color=color, line_thickness=outline)
 
 
 if __name__ == '__main__':
@@ -236,6 +307,12 @@ if __name__ == '__main__':
                         help='threshold for rejecting low overlap reid matches')
     parser.add_argument('--appearance_thresh', type=float, default=0.25,
                         help='threshold for rejecting low appearance similarity reid matches')
+
+    #KALMAN
+    parser.add_argument('--position-weight', type=float, default=1./20, help='coef that applies to w and h to estimate position uncertainty')
+    parser.add_argument('--velocity-weight', type=float, default=1./160, help='coef that applies to w and h to estimate velocity uncertainty')
+    parser.add_argument('--position-init-factor', type=float, default=2, help='coef that additionally applies to estimated uncertainty of position on init phase')
+    parser.add_argument('--velocity-init-factor', type=float, default=10, help='coef that additionally applies to estimated uncertainty of velocity on init phase')
 
     opt = parser.parse_args()
 
