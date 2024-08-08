@@ -84,6 +84,7 @@ class FastReIDInterface:
         patches = []
         for d in range(np.size(detections, 0)):
             tlbr = detections[d, :4].astype(np.int_)
+            # tlbr = detections[d, :4].numpy().astype(np.int_)
             tlbr[0] = max(0, tlbr[0])
             tlbr[1] = max(0, tlbr[1])
             tlbr[2] = min(W - 1, tlbr[2])
@@ -103,8 +104,9 @@ class FastReIDInterface:
 
             # Make shape with a new batch dimension which is adapted for network input
             patch = torch.as_tensor(patch.astype("float32").transpose(2, 0, 1))
-            patch = patch.to(device=self.device).half()
-
+            patch = patch.to(device=self.device)
+            if self.device != 'cpu':
+                patch.half()
             patches.append(patch)
 
             if (d + 1) % self.batch_size == 0:

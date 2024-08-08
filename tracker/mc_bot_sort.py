@@ -8,9 +8,6 @@ from tracker.gmc import GMC
 from tracker.basetrack import BaseTrack, TrackState
 from tracker.kalman_filter import KalmanFilter
 
-from fast_reid.fast_reid_interfece import FastReIDInterface
-
-
 class STrack(BaseTrack):
     shared_kalman = KalmanFilter()
 
@@ -236,26 +233,38 @@ class BoTSORT(object):
         self.frame_id = 0
         self.args = args
 
-        self.track_high_thresh = args.track_high_thresh
-        self.track_low_thresh = args.track_low_thresh
-        self.new_track_thresh = args.new_track_thresh
+        self.track_high_thresh = args.track_high_thresh # Tracking confidence threshold
+        self.track_low_thresh = args.track_low_thresh   # Lowest detection threshold 
+        self.new_track_thresh = args.new_track_thresh   # 
 
         self.buffer_size = int(frame_rate / 30.0 * args.track_buffer)
         self.max_time_lost = self.buffer_size
-        self.kalman_filter = KalmanFilter()
+        self.kalman_filter = KalmanFilter(
+            position_weight=args.position_weight,
+            velocity_weight=args.velocity_weight,
+            pos_init_factor=args.position_init_factor,
+            vel_init_factor=args.velocity_init_factor,
+        )
+        STrack.shared_kalman = KalmanFilter(
+            position_weight=args.position_weight,
+            velocity_weight=args.velocity_weight,
+            pos_init_factor=args.position_init_factor,
+            vel_init_factor=args.velocity_init_factor,
+        )
 
         # ReID module
-        self.proximity_thresh = args.proximity_thresh
-        self.appearance_thresh = args.appearance_thresh
+        self.proximity_thresh = args.proximity_thresh   # reid
+        self.appearance_thresh = args.appearance_thresh # reid
 
         if args.with_reid:
+            from fast_reid.fast_reid_interfece import FastReIDInterface
             self.encoder = FastReIDInterface(args.fast_reid_config, args.fast_reid_weights, args.device)
 
         self.gmc = GMC(method=args.cmc_method, verbose=[args.name, args.ablation])
 
     def update(self, output_results, img):
         self.frame_id += 1
-        activated_starcks = []
+        activated_starcks: list[STrack] = []
         refind_stracks = []
         lost_stracks = []
         removed_stracks = []
@@ -271,7 +280,7 @@ class BoTSORT(object):
             bboxes = bboxes[lowest_inds]
             scores = scores[lowest_inds]
             classes = classes[lowest_inds]
-            features = output_results[lowest_inds]
+            features = features[lowest_inds]
 
             # Find high threshold detections
             remain_inds = scores > self.args.track_high_thresh
@@ -380,9 +389,10 @@ class BoTSORT(object):
         else:
             detections_second = []
 
-        r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
+        r_tracked_stracks = [strack_pool[i] for i in u_track]
+        # r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
         dists = matching.iou_distance(r_tracked_stracks, detections_second)
-        matches, u_track, u_detection_second = matching.linear_assignment(dists, thresh=0.5)
+        matches, u_track, u_detection_second = matching.linear_assignment(dists, thresh=self.args.match_thresh)
         for itracked, idet in matches:
             track = r_tracked_stracks[itracked]
             det = detections_second[idet]
@@ -399,12 +409,15 @@ class BoTSORT(object):
                 track.mark_lost()
                 lost_stracks.append(track)
 
+
         '''Deal with unconfirmed tracks, usually tracks with only one beginning frame'''
-        detections = [detections[i] for i in u_detection]
+        detections_primary = [detections[i] for i in u_detection]
+        detections_secondary = [detections_second[i] for i in u_detection_second]
+        detections = detections_primary + list(set(detections_secondary) - set(detections_primary))
         dists = matching.iou_distance(unconfirmed, detections)
         if not self.args.mot20:
             dists = matching.fuse_score(dists, detections)
-        matches, u_unconfirmed, u_detection = matching.linear_assignment(dists, thresh=0.7)
+        matches, u_unconfirmed, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)
         for itracked, idet in matches:
             unconfirmed[itracked].update(detections[idet], self.frame_id)
             activated_starcks.append(unconfirmed[itracked])
@@ -412,6 +425,8 @@ class BoTSORT(object):
             track = unconfirmed[it]
             track.mark_removed()
             removed_stracks.append(track)
+
+        orphaned_tracks = []
 
         """ Step 4: Init new stracks"""
         for inew in u_detection:
@@ -421,6 +436,7 @@ class BoTSORT(object):
 
             track.activate(self.kalman_filter, self.frame_id)
             activated_starcks.append(track)
+            orphaned_tracks.append(track)
 
         """ Step 5: Update state"""
         for track in self.lost_stracks:
@@ -430,19 +446,24 @@ class BoTSORT(object):
 
         """ Merge """
         self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
-        self.tracked_stracks = joint_stracks(self.tracked_stracks, activated_starcks)
         self.tracked_stracks = joint_stracks(self.tracked_stracks, refind_stracks)
+        
+        self.tracked_stracks = joint_stracks(self.tracked_stracks, activated_starcks)
+        output_tracked = [track for track in self.tracked_stracks]
+        
+        
         self.lost_stracks = sub_stracks(self.lost_stracks, self.tracked_stracks)
         self.lost_stracks.extend(lost_stracks)
         self.lost_stracks = sub_stracks(self.lost_stracks, self.removed_stracks)
+        
         self.removed_stracks.extend(removed_stracks)
+        
         self.tracked_stracks, self.lost_stracks = remove_duplicate_stracks(self.tracked_stracks, self.lost_stracks)
 
         # output_stracks = [track for track in self.tracked_stracks if track.is_activated]
-        output_stracks = [track for track in self.tracked_stracks]
+        output_lost = [track for track in self.lost_stracks]
 
-
-        return output_stracks
+        return output_tracked, output_lost, orphaned_tracks
 
 
 def joint_stracks(tlista, tlistb):
