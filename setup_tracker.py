@@ -11,6 +11,6 @@ setup(
     author_email="ar.work.issues@gmail.com",
     description="Adss.Ai botsort fork with fixes",
     license="property of adss ai",
-    packages=['tracker'],
+    packages=['adssai_tracker'],
     classifiers=[]
 )
